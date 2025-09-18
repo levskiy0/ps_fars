@@ -17,6 +17,7 @@ class Ps_Fars extends Module
     private const CONFIG_SERVICE_URL = 'FARS_IMAGE_SERVICE';
     private const DEFAULT_SERVICE_URL = 'http://127.0.0.1:9090';
     private const CONFIG_INJECT_JS = 'FARS_INJECT_JS';
+    private const CONFIG_ALLOWED_DOMAINS = 'FARS_ALLOWED_DOMAINS';
 
     /** @var array<string, bool> */
     private static $registeredSmartyInstances = [];
@@ -48,6 +49,7 @@ class Ps_Fars extends Module
         return parent::install()
             && Configuration::updateValue(self::CONFIG_SERVICE_URL, self::DEFAULT_SERVICE_URL)
             && Configuration::updateValue(self::CONFIG_INJECT_JS, 1)
+            && Configuration::updateValue(self::CONFIG_ALLOWED_DOMAINS, '')
             && $this->registerHook('actionDispatcher')
             && $this->registerHook('displayHeader')
             && $this->registerHook('displayFooter')
@@ -61,6 +63,7 @@ class Ps_Fars extends Module
     {
         return Configuration::deleteByName(self::CONFIG_SERVICE_URL)
             && Configuration::deleteByName(self::CONFIG_INJECT_JS)
+            && Configuration::deleteByName(self::CONFIG_ALLOWED_DOMAINS)
             && parent::uninstall();
     }
 
@@ -106,13 +109,28 @@ class Ps_Fars extends Module
         if (Tools::isSubmit('submitLwFars')) {
             $serviceUrl = trim((string) Tools::getValue(self::CONFIG_SERVICE_URL));
             $injectJsFlag = Tools::getValue(self::CONFIG_INJECT_JS);
+            $allowedDomainsRaw = (string) Tools::getValue(
+                self::CONFIG_ALLOWED_DOMAINS,
+                (string) Configuration::get(self::CONFIG_ALLOWED_DOMAINS)
+            );
+            $invalidDomains = [];
+            $normalizedAllowedDomains = $this->prepareAllowedDomainsForStorage($allowedDomainsRaw, $invalidDomains);
 
             if (!Validate::isUrl($serviceUrl) && !Validate::isAbsoluteUrl($serviceUrl)) {
                 $output .= $this->displayError($this->trans('Please provide a valid URL.', [], 'Modules.Lw_fars.Admin'));
             } else {
                 Configuration::updateValue(self::CONFIG_SERVICE_URL, $serviceUrl);
                 Configuration::updateValue(self::CONFIG_INJECT_JS, $this->normalizeBoolean($injectJsFlag) ? 1 : 0);
+                Configuration::updateValue(self::CONFIG_ALLOWED_DOMAINS, $normalizedAllowedDomains);
                 $output .= $this->displayConfirmation($this->trans('Settings updated.', [], 'Modules.Lw_fars.Admin'));
+
+                if (!empty($invalidDomains)) {
+                    $output .= $this->displayWarning($this->trans(
+                        'The following domains were skipped because they are invalid: %domains%',
+                        ['%domains%' => implode(', ', $invalidDomains)],
+                        'Modules.Lw_fars.Admin'
+                    ));
+                }
             }
         }
 
@@ -137,8 +155,17 @@ class Ps_Fars extends Module
             'fields_value' => [
                 self::CONFIG_SERVICE_URL => Configuration::get(self::CONFIG_SERVICE_URL) ?: self::DEFAULT_SERVICE_URL,
                 self::CONFIG_INJECT_JS => (int) Configuration::get(self::CONFIG_INJECT_JS) === 1,
+                self::CONFIG_ALLOWED_DOMAINS => Tools::getValue(
+                    self::CONFIG_ALLOWED_DOMAINS,
+                    (string) Configuration::get(self::CONFIG_ALLOWED_DOMAINS)
+                ),
             ],
         ];
+
+        $baseHosts = $this->getBaseAllowedHosts();
+        $baseHostsText = $baseHosts
+            ? implode(', ', $baseHosts)
+            : $this->trans('No shop domains detected', [], 'Modules.Lw_fars.Admin');
 
         $fieldsForm = [
             'form' => [
@@ -153,6 +180,20 @@ class Ps_Fars extends Module
                         'name' => self::CONFIG_SERVICE_URL,
                         'required' => true,
                         'hint' => $this->trans('Base URL to your FARS image service (e.g. https://fars.example.com).', [], 'Modules.Lw_fars.Admin'),
+                    ],
+                    [
+                        'type' => 'textarea',
+                        'label' => $this->trans('Additional allowed domains', [], 'Modules.Lw_fars.Admin'),
+                        'name' => self::CONFIG_ALLOWED_DOMAINS,
+                        'rows' => 4,
+                        'cols' => 40,
+                        'placeholder' => "cdn.example.com\nmedia.example.org",
+                        'hint' => $this->trans('Add extra domains (one per line, host only) that should be treated as local images for smart content.', [], 'Modules.Lw_fars.Admin'),
+                        'desc' => $this->trans(
+                            'Current shop domains allowed automatically: %domains%. These domains are always rewritten.',
+                            ['%domains%' => $baseHostsText],
+                            'Modules.Lw_fars.Admin'
+                        ),
                     ],
                     [
                         'type' => 'switch',
@@ -930,6 +971,134 @@ class Ps_Fars extends Module
         return 0;
     }
 
+    private function prepareAllowedDomainsForStorage(string $raw, array &$invalidDomains = []): string
+    {
+        $invalidDomains = [];
+        $validDomains = [];
+
+        foreach ($this->tokenizeDomainList($raw) as $token) {
+            $normalized = $this->normalizeDomainToken($token);
+            if ($normalized === '') {
+                $invalidDomains[] = $token;
+                continue;
+            }
+
+            $validDomains[] = $normalized;
+        }
+
+        $validDomains = array_values(array_unique($validDomains));
+
+        return implode("\n", $validDomains);
+    }
+
+    private function tokenizeDomainList(string $raw): array
+    {
+        if ($raw === '') {
+            return [];
+        }
+
+        $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+        $tokens = preg_split('/[\n,]+/', $raw) ?: [];
+
+        $result = [];
+        foreach ($tokens as $token) {
+            $token = trim((string) $token);
+            if ($token === '') {
+                continue;
+            }
+
+            $result[] = $token;
+        }
+
+        return $result;
+    }
+
+    private function normalizeDomainToken(string $token): string
+    {
+        $token = trim($token);
+        if ($token === '') {
+            return '';
+        }
+
+        $token = preg_replace('#^https?://#i', '', $token);
+        if (!$token) {
+            return '';
+        }
+
+        $token = preg_replace('#/.*$#', '', $token);
+        if (!$token) {
+            return '';
+        }
+
+        if (strpos($token, ':') !== false) {
+            $parts = explode(':', $token, 2);
+            $token = $parts[0];
+        }
+
+        $token = trim($token, '.');
+        $token = strtolower($token);
+
+        if ($token === '') {
+            return '';
+        }
+
+        if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/', $token)) {
+            return '';
+        }
+
+        return $token;
+    }
+
+    private function getAdditionalAllowedDomains(): array
+    {
+        $raw = (string) Configuration::get(self::CONFIG_ALLOWED_DOMAINS);
+        if ($raw === '') {
+            return [];
+        }
+
+        $domains = [];
+        foreach ($this->tokenizeDomainList($raw) as $token) {
+            $normalized = $this->normalizeDomainToken($token);
+            if ($normalized === '') {
+                continue;
+            }
+
+            $domains[] = $normalized;
+        }
+
+        return array_values(array_unique($domains));
+    }
+
+    private function getBaseAllowedHosts(): array
+    {
+        $base = array_filter(array_unique([
+            (string) Configuration::get('PS_SHOP_DOMAIN'),
+            (string) Configuration::get('PS_SHOP_DOMAIN_SSL'),
+            Tools::getShopDomain(),
+            Tools::getShopDomainSsl(),
+        ]));
+
+        $normalized = [];
+        foreach ($base as $host) {
+            $normalizedHost = $this->normalizeDomainToken($host);
+            if ($normalizedHost === '') {
+                continue;
+            }
+
+            $normalized[] = $normalizedHost;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    private function getAllowedHosts(): array
+    {
+        return array_values(array_unique(array_merge(
+            $this->getBaseAllowedHosts(),
+            $this->getAdditionalAllowedDomains()
+        )));
+    }
+
     private function isLocalImageSrc(string $src): bool
     {
         if ($src === '') {
@@ -940,25 +1109,28 @@ class Ps_Fars extends Module
             return false;
         }
 
-        $allowedHosts = array_filter(array_unique([
-            (string) Configuration::get('PS_SHOP_DOMAIN'),
-            (string) Configuration::get('PS_SHOP_DOMAIN_SSL'),
-            Tools::getShopDomain(),
-            Tools::getShopDomainSsl(),
-        ]));
-
-        $allowedHosts = array_values(array_unique(array_map('strtolower', array_filter($allowedHosts))));
+        $allowedHosts = $this->getAllowedHosts();
 
         if (preg_match('#^https?://#i', $src)) {
             $host = parse_url($src, PHP_URL_HOST);
+            if (!$host) {
+                return false;
+            }
 
-            return $host && in_array(strtolower($host), $allowedHosts, true);
+            $normalizedHost = $this->normalizeDomainToken($host);
+
+            return $normalizedHost !== '' && in_array($normalizedHost, $allowedHosts, true);
         }
 
         if (strpos($src, '//') === 0) {
             $host = parse_url('https:' . $src, PHP_URL_HOST);
+            if (!$host) {
+                return false;
+            }
 
-            return $host && in_array(strtolower($host), $allowedHosts, true);
+            $normalizedHost = $this->normalizeDomainToken($host);
+
+            return $normalizedHost !== '' && in_array($normalizedHost, $allowedHosts, true);
         }
 
         if (preg_match('#^[a-z]+:#i', $src)) {
