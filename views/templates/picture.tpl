@@ -15,7 +15,7 @@
         {/if}
 
         {foreach from=$formats item=format}
-            <source{$_media_attr} type="{$format.mime}"
+            <source{$_media_attr nofilter} type="{$format.mime}"
                     srcset="{$_raw1x}{$format.extension}, {$_raw2x}{$format.extension} 2x">
         {/foreach}
     {/foreach}
