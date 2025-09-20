@@ -7,13 +7,17 @@
 
         {assign var=_raw1x value="`$service`/resize/`$_bw`x`$_bh``$src`"}
         {assign var=_raw2x value="`$service`/resize/`$_bw2`x`$_bh2``$src`"}
+        {assign var=_media value=$bp.media|trim}
+        {if $_media ne ''}
+            {assign var=_media_attr value=" media=\"`$_media`\""}
+        {else}
+            {assign var=_media_attr value=''}
+        {/if}
 
-        <source media="{$bp.media}" type="image/avif"
-                srcset="{$_raw1x}.avif, {$_raw2x}.avif 2x">
-        <source media="{$bp.media}" type="image/webp"
-                srcset="{$_raw1x}.webp, {$_raw2x}.webp 2x">
-        <source media="{$bp.media}" type="image/jpeg"
-                srcset="{$_raw1x}, {$_raw2x} 2x">
+        {foreach from=$formats item=format}
+            <source{$_media_attr} type="{$format.mime}"
+                    srcset="{$_raw1x}{$format.extension}, {$_raw2x}{$format.extension} 2x">
+        {/foreach}
     {/foreach}
 
     {assign var=_bw value=$w|intval}
@@ -24,12 +28,10 @@
     {assign var=raw1x value="`$service`/resize/`$_bw`x`$_bh``$src`"}
     {assign var=raw2x value="`$service`/resize/`$_bw2`x`$_bh2``$src`"}
 
-    <source type="image/avif"
-            srcset="{$raw1x}.avif, {$raw2x}.avif 2x">
-    <source type="image/webp"
-            srcset="{$raw1x}.webp, {$raw2x}.webp 2x">
-    <source type="image/jpeg"
-            srcset="{$raw1x}, {$raw2x} 2x">
+    {foreach from=$formats item=format}
+        <source type="{$format.mime}"
+                srcset="{$raw1x}{$format.extension}, {$raw2x}{$format.extension} 2x">
+    {/foreach}
 
     <img
         class="{$class}"
