@@ -45,8 +45,8 @@ class Ps_Fars extends Module
 
         parent::__construct();
 
-        $this->displayName = $this->trans('FARS image service', [], 'Modules.Lw_fars.Admin');
-        $this->description = $this->trans('Provides Smarty helpers for the FARS remote image service.', [], 'Modules.Lw_fars.Admin');
+        $this->displayName = $this->trans('FARS image service', [], 'Modules.Ps_fars.Admin');
+        $this->description = $this->trans('Provides Smarty helpers for the FARS remote image service.', [], 'Modules.Ps_fars.Admin');
         $this->ps_versions_compliancy = ['min' => '8.0', 'max' => _PS_VERSION_];
     }
 
@@ -144,7 +144,7 @@ class Ps_Fars extends Module
             $normalizedAllowedDomains = $this->prepareAllowedDomainsForStorage($allowedDomainsRaw, $invalidDomains);
 
             if (!Validate::isUrl($serviceUrl) && !Validate::isAbsoluteUrl($serviceUrl)) {
-                $output .= $this->displayError($this->trans('Please provide a valid URL.', [], 'Modules.Lw_fars.Admin'));
+                $output .= $this->displayError($this->trans('Please provide a valid URL.', [], 'Modules.Ps_fars.Admin'));
             } else {
                 Configuration::updateValue(self::CONFIG_SERVICE_URL, $serviceUrl);
                 Configuration::updateValue(self::CONFIG_INJECT_JS, $this->normalizeBoolean($injectJsFlag) ? 1 : 0);
@@ -162,13 +162,13 @@ class Ps_Fars extends Module
                     $formatPngNormalized ? 1 : 0
                 );
                 $this->pictureFormatsCache = null;
-                $output .= $this->displayConfirmation($this->trans('Settings updated.', [], 'Modules.Lw_fars.Admin'));
+                $output .= $this->displayConfirmation($this->trans('Settings updated.', [], 'Modules.Ps_fars.Admin'));
 
                 if (!empty($invalidDomains)) {
                     $output .= $this->displayWarning($this->trans(
                         'The following domains were skipped because they are invalid: %domains%',
                         ['%domains%' => implode(', ', $invalidDomains)],
-                        'Modules.Lw_fars.Admin'
+                        'Modules.Ps_fars.Admin'
                     ));
                 }
             }
@@ -208,115 +208,115 @@ class Ps_Fars extends Module
         $baseHosts = $this->getBaseAllowedHosts();
         $baseHostsText = $baseHosts
             ? implode(', ', $baseHosts)
-            : $this->trans('No shop domains detected', [], 'Modules.Lw_fars.Admin');
+            : $this->trans('No shop domains detected', [], 'Modules.Ps_fars.Admin');
 
         $fieldsForm = [
             'form' => [
                 'legend' => [
-                    'title' => $this->trans('Settings', [], 'Modules.Lw_fars.Admin'),
+                    'title' => $this->trans('Settings', [], 'Modules.Ps_fars.Admin'),
                     'icon' => 'icon-cogs',
                 ],
                 'input' => [
                     [
                         'type' => 'text',
-                        'label' => $this->trans('Service URL', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Service URL', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_SERVICE_URL,
                         'required' => true,
-                        'hint' => $this->trans('Base URL to your FARS image service (e.g. https://fars.example.com).', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Base URL to your FARS image service (e.g. https://fars.example.com).', [], 'Modules.Ps_fars.Admin'),
                     ],
                     [
                         'type' => 'textarea',
-                        'label' => $this->trans('Additional allowed domains', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Additional allowed domains', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_ALLOWED_DOMAINS,
                         'rows' => 4,
                         'cols' => 40,
                         'placeholder' => "cdn.example.com\nmedia.example.org",
-                        'hint' => $this->trans('Add extra domains (one per line, host only) that should be treated as local images for smart content.', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Add extra domains (one per line, host only) that should be treated as local images for smart content.', [], 'Modules.Ps_fars.Admin'),
                         'desc' => $this->trans(
                             'Current shop domains allowed automatically: %domains%. These domains are always rewritten.',
                             ['%domains%' => $baseHostsText],
-                            'Modules.Lw_fars.Admin'
+                            'Modules.Ps_fars.Admin'
                         ),
                     ],
                     [
                         'type' => 'switch',
-                        'label' => $this->trans('Generate AVIF sources', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Generate AVIF sources', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_FORMAT_AVIF,
                         'is_bool' => true,
                         'values' => [
                             [
                                 'id' => 'format_avif_on',
                                 'value' => 1,
-                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('On', [], 'Modules.Ps_fars.Admin'),
                             ],
                             [
                                 'id' => 'format_avif_off',
                                 'value' => 0,
-                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('Off', [], 'Modules.Ps_fars.Admin'),
                             ],
                         ],
-                        'hint' => $this->trans('Toggle AVIF `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Toggle AVIF `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Ps_fars.Admin'),
                     ],
                     [
                         'type' => 'switch',
-                        'label' => $this->trans('Generate WebP sources', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Generate WebP sources', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_FORMAT_WEBP,
                         'is_bool' => true,
                         'values' => [
                             [
                                 'id' => 'format_webp_on',
                                 'value' => 1,
-                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('On', [], 'Modules.Ps_fars.Admin'),
                             ],
                             [
                                 'id' => 'format_webp_off',
                                 'value' => 0,
-                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('Off', [], 'Modules.Ps_fars.Admin'),
                             ],
                         ],
-                        'hint' => $this->trans('Toggle WebP `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Toggle WebP `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Ps_fars.Admin'),
                     ],
                     [
                         'type' => 'switch',
-                        'label' => $this->trans('Generate PNG sources', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Generate PNG sources', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_FORMAT_PNG,
                         'is_bool' => true,
                         'values' => [
                             [
                                 'id' => 'format_png_on',
                                 'value' => 1,
-                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('On', [], 'Modules.Ps_fars.Admin'),
                             ],
                             [
                                 'id' => 'format_png_off',
                                 'value' => 0,
-                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('Off', [], 'Modules.Ps_fars.Admin'),
                             ],
                         ],
-                        'hint' => $this->trans('Toggle PNG `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Toggle PNG `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Ps_fars.Admin'),
                     ],
                     [
                         'type' => 'switch',
-                        'label' => $this->trans('Inject JS helper', [], 'Modules.Lw_fars.Admin'),
+                        'label' => $this->trans('Inject JS helper', [], 'Modules.Ps_fars.Admin'),
                         'name' => self::CONFIG_INJECT_JS,
                         'is_bool' => true,
                         'values' => [
                             [
                                 'id' => 'inject_js_on',
                                 'value' => 1,
-                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('On', [], 'Modules.Ps_fars.Admin'),
                             ],
                             [
                                 'id' => 'inject_js_off',
                                 'value' => 0,
-                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                                'label' => $this->trans('Off', [], 'Modules.Ps_fars.Admin'),
                             ],
                         ],
-                        'hint' => $this->trans('Toggle injection of the frontend JS helper (window.fars_url). Disable if you embed a custom bundle instead.', [], 'Modules.Lw_fars.Admin'),
+                        'hint' => $this->trans('Toggle injection of the frontend JS helper (window.fars_url). Disable if you embed a custom bundle instead.', [], 'Modules.Ps_fars.Admin'),
                     ],
                 ],
                 'submit' => [
-                    'title' => $this->trans('Save', [], 'Modules.Lw_fars.Admin'),
+                    'title' => $this->trans('Save', [], 'Modules.Ps_fars.Admin'),
                 ],
             ],
         ];
