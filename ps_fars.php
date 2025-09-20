@@ -18,6 +18,9 @@ class Ps_Fars extends Module
     private const DEFAULT_SERVICE_URL = 'http://127.0.0.1:9090';
     private const CONFIG_INJECT_JS = 'FARS_INJECT_JS';
     private const CONFIG_ALLOWED_DOMAINS = 'FARS_ALLOWED_DOMAINS';
+    private const CONFIG_FORMAT_AVIF = 'FARS_FORMAT_AVIF';
+    private const CONFIG_FORMAT_WEBP = 'FARS_FORMAT_WEBP';
+    private const CONFIG_FORMAT_PNG = 'FARS_FORMAT_PNG';
 
     /** @var array<string, bool> */
     private static $registeredSmartyInstances = [];
@@ -27,6 +30,9 @@ class Ps_Fars extends Module
 
     /** @var bool */
     private static $frontInlineInjected = false;
+
+    /** @var array<int, array<string, string>>|null */
+    private $pictureFormatsCache = null;
 
     public function __construct()
     {
@@ -50,6 +56,9 @@ class Ps_Fars extends Module
             && Configuration::updateValue(self::CONFIG_SERVICE_URL, self::DEFAULT_SERVICE_URL)
             && Configuration::updateValue(self::CONFIG_INJECT_JS, 1)
             && Configuration::updateValue(self::CONFIG_ALLOWED_DOMAINS, '')
+            && Configuration::updateValue(self::CONFIG_FORMAT_AVIF, 1)
+            && Configuration::updateValue(self::CONFIG_FORMAT_WEBP, 1)
+            && Configuration::updateValue(self::CONFIG_FORMAT_PNG, 0)
             && $this->registerHook('actionDispatcher')
             && $this->registerHook('displayHeader')
             && $this->registerHook('displayFooter')
@@ -64,6 +73,9 @@ class Ps_Fars extends Module
         return Configuration::deleteByName(self::CONFIG_SERVICE_URL)
             && Configuration::deleteByName(self::CONFIG_INJECT_JS)
             && Configuration::deleteByName(self::CONFIG_ALLOWED_DOMAINS)
+            && Configuration::deleteByName(self::CONFIG_FORMAT_AVIF)
+            && Configuration::deleteByName(self::CONFIG_FORMAT_WEBP)
+            && Configuration::deleteByName(self::CONFIG_FORMAT_PNG)
             && parent::uninstall();
     }
 
@@ -113,6 +125,21 @@ class Ps_Fars extends Module
                 self::CONFIG_ALLOWED_DOMAINS,
                 (string) Configuration::get(self::CONFIG_ALLOWED_DOMAINS)
             );
+            $formatAvifFlag = Tools::getValue(
+                self::CONFIG_FORMAT_AVIF,
+                (string) Configuration::get(self::CONFIG_FORMAT_AVIF)
+            );
+            $formatWebpFlag = Tools::getValue(
+                self::CONFIG_FORMAT_WEBP,
+                (string) Configuration::get(self::CONFIG_FORMAT_WEBP)
+            );
+            $formatPngFlag = Tools::getValue(
+                self::CONFIG_FORMAT_PNG,
+                (string) Configuration::get(self::CONFIG_FORMAT_PNG)
+            );
+            $formatAvifNormalized = $this->normalizeBoolean($formatAvifFlag);
+            $formatWebpNormalized = $this->normalizeBoolean($formatWebpFlag);
+            $formatPngNormalized = $this->normalizeBoolean($formatPngFlag);
             $invalidDomains = [];
             $normalizedAllowedDomains = $this->prepareAllowedDomainsForStorage($allowedDomainsRaw, $invalidDomains);
 
@@ -122,6 +149,19 @@ class Ps_Fars extends Module
                 Configuration::updateValue(self::CONFIG_SERVICE_URL, $serviceUrl);
                 Configuration::updateValue(self::CONFIG_INJECT_JS, $this->normalizeBoolean($injectJsFlag) ? 1 : 0);
                 Configuration::updateValue(self::CONFIG_ALLOWED_DOMAINS, $normalizedAllowedDomains);
+                Configuration::updateValue(
+                    self::CONFIG_FORMAT_AVIF,
+                    $formatAvifNormalized !== false ? 1 : 0
+                );
+                Configuration::updateValue(
+                    self::CONFIG_FORMAT_WEBP,
+                    $formatWebpNormalized !== false ? 1 : 0
+                );
+                Configuration::updateValue(
+                    self::CONFIG_FORMAT_PNG,
+                    $formatPngNormalized ? 1 : 0
+                );
+                $this->pictureFormatsCache = null;
                 $output .= $this->displayConfirmation($this->trans('Settings updated.', [], 'Modules.Lw_fars.Admin'));
 
                 if (!empty($invalidDomains)) {
@@ -159,6 +199,9 @@ class Ps_Fars extends Module
                     self::CONFIG_ALLOWED_DOMAINS,
                     (string) Configuration::get(self::CONFIG_ALLOWED_DOMAINS)
                 ),
+                self::CONFIG_FORMAT_AVIF => (int) Configuration::get(self::CONFIG_FORMAT_AVIF) !== 0,
+                self::CONFIG_FORMAT_WEBP => (int) Configuration::get(self::CONFIG_FORMAT_WEBP) !== 0,
+                self::CONFIG_FORMAT_PNG => (int) Configuration::get(self::CONFIG_FORMAT_PNG) !== 0,
             ],
         ];
 
@@ -194,6 +237,63 @@ class Ps_Fars extends Module
                             ['%domains%' => $baseHostsText],
                             'Modules.Lw_fars.Admin'
                         ),
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->trans('Generate AVIF sources', [], 'Modules.Lw_fars.Admin'),
+                        'name' => self::CONFIG_FORMAT_AVIF,
+                        'is_bool' => true,
+                        'values' => [
+                            [
+                                'id' => 'format_avif_on',
+                                'value' => 1,
+                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                            [
+                                'id' => 'format_avif_off',
+                                'value' => 0,
+                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                        ],
+                        'hint' => $this->trans('Toggle AVIF `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->trans('Generate WebP sources', [], 'Modules.Lw_fars.Admin'),
+                        'name' => self::CONFIG_FORMAT_WEBP,
+                        'is_bool' => true,
+                        'values' => [
+                            [
+                                'id' => 'format_webp_on',
+                                'value' => 1,
+                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                            [
+                                'id' => 'format_webp_off',
+                                'value' => 0,
+                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                        ],
+                        'hint' => $this->trans('Toggle WebP `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->trans('Generate PNG sources', [], 'Modules.Lw_fars.Admin'),
+                        'name' => self::CONFIG_FORMAT_PNG,
+                        'is_bool' => true,
+                        'values' => [
+                            [
+                                'id' => 'format_png_on',
+                                'value' => 1,
+                                'label' => $this->trans('On', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                            [
+                                'id' => 'format_png_off',
+                                'value' => 0,
+                                'label' => $this->trans('Off', [], 'Modules.Lw_fars.Admin'),
+                            ],
+                        ],
+                        'hint' => $this->trans('Toggle PNG `<source>` generation inside rendered `<picture>` blocks.', [], 'Modules.Lw_fars.Admin'),
                     ],
                     [
                         'type' => 'switch',
@@ -656,45 +756,29 @@ class Ps_Fars extends Module
         }
 
         $sources = [];
+        $formats = $this->getPictureFormats();
         foreach ($fallbackSources as $fallbackSource) {
             $media = $fallbackSource['media'] ?? '';
             $mediaAttr = $media !== '' ? ' media="' . $this->escapeAttribute($media) . '"' : '';
 
+            foreach ($formats as $format) {
+                $sources[] = sprintf(
+                    '<source%s type="%s" srcset="%s, %s 2x"/>',
+                    $mediaAttr,
+                    $this->escapeAttribute($format['mime']),
+                    $this->escapeAttribute($fallbackSource['base1x'] . $format['extension']),
+                    $this->escapeAttribute($fallbackSource['base2x'] . $format['extension'])
+                );
+            }
+        }
+        foreach ($formats as $format) {
             $sources[] = sprintf(
-                '<source%s type="image/avif" srcset="%s, %s 2x"/>',
-                $mediaAttr,
-                $this->escapeAttribute($fallbackSource['base1x'] . '.avif'),
-                $this->escapeAttribute($fallbackSource['base2x'] . '.avif')
-            );
-            $sources[] = sprintf(
-                '<source%s type="image/webp" srcset="%s, %s 2x"/>',
-                $mediaAttr,
-                $this->escapeAttribute($fallbackSource['base1x'] . '.webp'),
-                $this->escapeAttribute($fallbackSource['base2x'] . '.webp')
-            );
-            $sources[] = sprintf(
-                '<source%s type="image/jpeg" srcset="%s, %s 2x"/>',
-                $mediaAttr,
-                $this->escapeAttribute($fallbackSource['base1x']),
-                $this->escapeAttribute($fallbackSource['base2x'])
+                '<source type="%s" srcset="%s, %s 2x"/>',
+                $this->escapeAttribute($format['mime']),
+                $this->escapeAttribute($base1x . $format['extension']),
+                $this->escapeAttribute($base2x . $format['extension'])
             );
         }
-
-        $sources[] = sprintf(
-            '<source type="image/avif" srcset="%s, %s 2x"/>',
-            $this->escapeAttribute($base1x . '.avif'),
-            $this->escapeAttribute($base2x . '.avif')
-        );
-        $sources[] = sprintf(
-            '<source type="image/webp" srcset="%s, %s 2x"/>',
-            $this->escapeAttribute($base1x . '.webp'),
-            $this->escapeAttribute($base2x . '.webp')
-        );
-        $sources[] = sprintf(
-            '<source type="image/jpeg" srcset="%s, %s 2x"/>',
-            $this->escapeAttribute($base1x),
-            $this->escapeAttribute($base2x)
-        );
 
         $imgAttributes = [];
         if ($class !== '') {
@@ -916,7 +1000,51 @@ class Ps_Fars extends Module
             'data' => (array) ($params['data'] ?? []),
             'fallbacks' => $fallbacks,
             'sizes' => (string) ($params['sizes'] ?? ''),
+            'formats' => $this->getPictureFormats(),
         ];
+    }
+
+    private function getPictureFormats(): array
+    {
+        if ($this->pictureFormatsCache !== null) {
+            return $this->pictureFormatsCache;
+        }
+
+        $formats = [];
+
+        if ((int) Configuration::get(self::CONFIG_FORMAT_AVIF) !== 0) {
+            $formats[] = [
+                'key' => 'avif',
+                'extension' => '.avif',
+                'mime' => 'image/avif',
+            ];
+        }
+
+        if ((int) Configuration::get(self::CONFIG_FORMAT_WEBP) !== 0) {
+            $formats[] = [
+                'key' => 'webp',
+                'extension' => '.webp',
+                'mime' => 'image/webp',
+            ];
+        }
+
+        if ((int) Configuration::get(self::CONFIG_FORMAT_PNG) !== 0) {
+            $formats[] = [
+                'key' => 'png',
+                'extension' => '.png',
+                'mime' => 'image/png',
+            ];
+        }
+
+        $formats[] = [
+            'key' => 'jpeg',
+            'extension' => '',
+            'mime' => 'image/jpeg',
+        ];
+
+        $this->pictureFormatsCache = $formats;
+
+        return $this->pictureFormatsCache;
     }
 
     private function normalizeFallbacks($fallbacks): array
