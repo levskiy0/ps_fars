@@ -1,4 +1,5 @@
 <?php
+
 /**
  * FARS
  *
@@ -7,7 +8,6 @@
  * Author: 40x.Pro@gmail.com | github.com/levskiy0
  * Date: 17.09.2025
  */
-
 if (!defined('_PS_VERSION_')) {
     exit;
 }
@@ -32,7 +32,7 @@ class Ps_Fars extends Module
     private static $frontInlineInjected = false;
 
     /** @var array<int, array<string, string>>|null */
-    private $pictureFormatsCache = null;
+    private $pictureFormatsCache;
 
     public function __construct()
     {
@@ -52,31 +52,50 @@ class Ps_Fars extends Module
 
     public function install()
     {
-        return parent::install()
-            && Configuration::updateValue(self::CONFIG_SERVICE_URL, self::DEFAULT_SERVICE_URL)
-            && Configuration::updateValue(self::CONFIG_INJECT_JS, 1)
-            && Configuration::updateValue(self::CONFIG_ALLOWED_DOMAINS, '')
-            && Configuration::updateValue(self::CONFIG_FORMAT_AVIF, 1)
-            && Configuration::updateValue(self::CONFIG_FORMAT_WEBP, 1)
-            && Configuration::updateValue(self::CONFIG_FORMAT_PNG, 0)
-            && $this->registerHook('actionDispatcher')
-            && $this->registerHook('displayHeader')
-            && $this->registerHook('displayFooter')
-            && $this->registerHook('displayFooterBefore')
-            && $this->registerHook('displayFooterAfter')
-            && $this->registerHook('displayBeforeBodyClosingTag')
-            && $this->registerHook('displayBackOfficeHeader');
+        if (!parent::install()) {
+            return false;
+        }
+
+        $defaults = [
+            self::CONFIG_SERVICE_URL => self::DEFAULT_SERVICE_URL,
+            self::CONFIG_INJECT_JS => 1,
+            self::CONFIG_ALLOWED_DOMAINS => '',
+            self::CONFIG_FORMAT_AVIF => 1,
+            self::CONFIG_FORMAT_WEBP => 1,
+            self::CONFIG_FORMAT_PNG => 0,
+        ];
+
+        foreach ($defaults as $key => $value) {
+            $current = Configuration::get($key);
+            if ($current === false || $current === null || $current === '') {
+                if (!Configuration::updateValue($key, $value)) {
+                    return false;
+                }
+            }
+        }
+
+        $hooks = [
+            'actionDispatcher',
+            'displayHeader',
+            'displayFooter',
+            'displayFooterBefore',
+            'displayFooterAfter',
+            'displayBeforeBodyClosingTag',
+            'displayBackOfficeHeader',
+        ];
+
+        foreach ($hooks as $hook) {
+            if (!$this->registerHook($hook)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function uninstall()
     {
-        return Configuration::deleteByName(self::CONFIG_SERVICE_URL)
-            && Configuration::deleteByName(self::CONFIG_INJECT_JS)
-            && Configuration::deleteByName(self::CONFIG_ALLOWED_DOMAINS)
-            && Configuration::deleteByName(self::CONFIG_FORMAT_AVIF)
-            && Configuration::deleteByName(self::CONFIG_FORMAT_WEBP)
-            && Configuration::deleteByName(self::CONFIG_FORMAT_PNG)
-            && parent::uninstall();
+        return parent::uninstall();
     }
 
     public function hookActionDispatcher($params)
@@ -340,6 +359,7 @@ class Ps_Fars extends Module
         $smarty->registerPlugin('function', 'fars_product_url', [$this, 'smartyFarsProductUrl'], true);
         $smarty->registerPlugin('function', 'fars_picture', [$this, 'smartyFarsPicture'], true);
         $smarty->registerPlugin('function', 'fars_image', [$this, 'smartyFarsImage'], true);
+        $smarty->registerPlugin('function', 'fars_link_preload', [$this, 'smartyFarsLinkPreload'], true);
         $smarty->registerPlugin('function', 'fars_smart_content', [$this, 'smartyFarsSmartContent'], true);
         $smarty->registerPlugin('modifier', 'fars_smart_content', [$this, 'smartyFarsSmartContentModifier'], true);
 
@@ -476,6 +496,29 @@ class Ps_Fars extends Module
         return $this->renderPictureMarkup($params, $template, 'img');
     }
 
+    public function smartyFarsLinkPreload($params, Smarty_Internal_Template $template)
+    {
+        $prepared = $this->prepareRenderParams($params);
+
+        if ($prepared['src'] === '') {
+            return '';
+        }
+
+        $variants = $this->buildPreloadVariants($prepared);
+        $links = [];
+
+        foreach ($variants as $variant) {
+            foreach ($prepared['formats'] as $format) {
+                $tag = $this->buildPreloadLinkTag($prepared, $variant, $format);
+                if ($tag !== '') {
+                    $links[] = $tag;
+                }
+            }
+        }
+
+        return implode("\n", $links);
+    }
+
     public function smartyFarsSmartContent($params, Smarty_Internal_Template $template)
     {
         $html = '';
@@ -517,20 +560,42 @@ class Ps_Fars extends Module
 
         $fallbacks = $this->extractSmartContentFallbacks($fallbacksSpec);
 
-        return $this->transformSmartContent($html, $maxWidth, $lazyFlag, $fallbacks);
+        $hdpiFlag = null;
+        if (array_key_exists('hdpi', $params)) {
+            $hdpiFlag = $this->normalizeBoolean($params['hdpi']);
+        }
+
+        return $this->transformSmartContent($html, $maxWidth, $lazyFlag, $fallbacks, $hdpiFlag);
     }
 
-    public function smartyFarsSmartContentModifier($html, $maxWidth = null, $lazyFlag = null, $fallbacks = null)
-    {
+    public function smartyFarsSmartContentModifier(
+        $html,
+        $maxWidth = null,
+        $lazyFlag = null,
+        $fallbacks = null,
+        $hdpi = null,
+    ) {
         $maxWidthValue = $this->parseDimension($maxWidth);
         $lazyValue = $this->normalizeBoolean($lazyFlag);
         $fallbacksValue = $this->extractSmartContentFallbacks($fallbacks);
+        $hdpiValue = $this->normalizeBoolean($hdpi);
 
-        return $this->transformSmartContent((string) $html, $maxWidthValue, $lazyValue, $fallbacksValue);
+        return $this->transformSmartContent(
+            (string) $html,
+            $maxWidthValue,
+            $lazyValue,
+            $fallbacksValue,
+            $hdpiValue
+        );
     }
 
-    private function transformSmartContent(string $html, ?int $maxWidth = null, ?bool $forceLazy = null, array $fallbacks = []): string
-    {
+    private function transformSmartContent(
+        string $html,
+        ?int $maxWidth = null,
+        ?bool $forceLazy = null,
+        array $fallbacks = [],
+        ?bool $hdpiFlag = null,
+    ): string {
         if ($html === '') {
             return '';
         }
@@ -555,6 +620,7 @@ class Ps_Fars extends Module
         }
 
         $maxWidth = $maxWidth !== null && $maxWidth > 0 ? $maxWidth : null;
+        $hdpi = $hdpiFlag === null ? true : (bool) $hdpiFlag;
 
         /** @var DOMElement $image */
         foreach ($images as $image) {
@@ -606,24 +672,28 @@ class Ps_Fars extends Module
                 continue;
             }
 
-            $doubleWidth = $width > 0 ? $width * 2 : 0;
-            $doubleHeight = $height > 0 ? $height * 2 : 0;
-            $base2x = $this->buildResizeBase($cleanPath, $doubleWidth, $doubleHeight);
-            if ($base2x === '') {
-                continue;
+            $base2x = '';
+            if ($hdpi) {
+                $doubleWidth = $width > 0 ? $width * 2 : 0;
+                $doubleHeight = $height > 0 ? $height * 2 : 0;
+                $base2x = $this->buildResizeBase($cleanPath, $doubleWidth, $doubleHeight);
+                if ($base2x === '') {
+                    continue;
+                }
             }
 
             $resolvedFallbacks = $this->resolveSmartContentFallbackSources(
                 $fallbacks,
                 $cleanPath,
                 $maxWidth,
-                $width
+                $width,
+                $hdpi
             );
 
             $pictureMarkup = $this->buildSmartContentPictureMarkup(
                 $image,
                 $base1x,
-                $base2x,
+                $hdpi ? $base2x : null,
                 $width,
                 $height,
                 $originalWidthAttr,
@@ -631,7 +701,8 @@ class Ps_Fars extends Module
                 $widthAdjusted,
                 $heightAdjusted,
                 $forceLazy,
-                $resolvedFallbacks
+                $resolvedFallbacks,
+                $hdpi
             );
 
             if ($pictureMarkup === '') {
@@ -660,7 +731,7 @@ class Ps_Fars extends Module
     private function buildSmartContentPictureMarkup(
         DOMElement $image,
         string $base1x,
-        string $base2x,
+        ?string $base2x,
         int $width,
         int $height,
         string $originalWidthAttr,
@@ -668,7 +739,8 @@ class Ps_Fars extends Module
         bool $widthAdjusted,
         bool $heightAdjusted,
         ?bool $forceLazy,
-        array $fallbackSources
+        array $fallbackSources,
+        bool $hdpi,
     ): string {
         $attributes = [];
         foreach ($image->attributes as $attr) {
@@ -762,21 +834,40 @@ class Ps_Fars extends Module
             $mediaAttr = $media !== '' ? ' media="' . $this->escapeAttribute($media) . '"' : '';
 
             foreach ($formats as $format) {
+                $srcsetParts = [
+                    $fallbackSource['base1x'] . $format['extension'],
+                ];
+
+                if (
+                    $hdpi
+                    && !empty($fallbackSource['base2x'])
+                    && $fallbackSource['base2x'] !== $fallbackSource['base1x']
+                ) {
+                    $srcsetParts[] = $fallbackSource['base2x'] . $format['extension'] . ' 2x';
+                }
+
                 $sources[] = sprintf(
-                    '<source%s type="%s" srcset="%s, %s 2x"/>',
+                    '<source%s type="%s" srcset="%s"/>',
                     $mediaAttr,
                     $this->escapeAttribute($format['mime']),
-                    $this->escapeAttribute($fallbackSource['base1x'] . $format['extension']),
-                    $this->escapeAttribute($fallbackSource['base2x'] . $format['extension'])
+                    $this->escapeAttribute(implode(', ', $srcsetParts))
                 );
             }
         }
+
         foreach ($formats as $format) {
+            $srcsetParts = [
+                $base1x . $format['extension'],
+            ];
+
+            if ($hdpi && $base2x !== null && $base2x !== '' && $base2x !== $base1x) {
+                $srcsetParts[] = $base2x . $format['extension'] . ' 2x';
+            }
+
             $sources[] = sprintf(
-                '<source type="%s" srcset="%s, %s 2x"/>',
+                '<source type="%s" srcset="%s"/>',
                 $this->escapeAttribute($format['mime']),
-                $this->escapeAttribute($base1x . $format['extension']),
-                $this->escapeAttribute($base2x . $format['extension'])
+                $this->escapeAttribute(implode(', ', $srcsetParts))
             );
         }
 
@@ -811,7 +902,12 @@ class Ps_Fars extends Module
             $imgAttributes[] = 'fetchpriority="' . $this->escapeAttribute($fetchpriority) . '"';
         }
 
-        $imgAttributes[] = 'srcset="' . $this->escapeAttribute($base1x . ' 1x, ' . $base2x . ' 2x') . '"';
+        $imgSrcsetParts = [$base1x];
+        if ($hdpi && $base2x !== null && $base2x !== '' && $base2x !== $base1x) {
+            $imgSrcsetParts[0] .= ' 1x';
+            $imgSrcsetParts[] = $base2x . ' 2x';
+        }
+        $imgAttributes[] = 'srcset="' . $this->escapeAttribute(implode(', ', $imgSrcsetParts)) . '"';
 
         if ($sizes !== '') {
             $imgAttributes[] = 'sizes="' . $this->escapeAttribute($sizes) . '"';
@@ -870,11 +966,11 @@ class Ps_Fars extends Module
 
     private function resolveSmartContentFallbackSources(
         array $fallbacks,
-        string $cleanPath,
+        string $path,
         ?int $maxWidth,
-        int $baseWidth
-    ): array
-    {
+        int $baseWidth,
+        bool $hdpi,
+    ): array {
         if (empty($fallbacks)) {
             return [];
         }
@@ -907,16 +1003,19 @@ class Ps_Fars extends Module
                 continue;
             }
 
-            $base1x = $this->buildResizeBase($cleanPath, $fw, $fh);
+            $base1x = $this->buildResizeBase($path, $fw, $fh);
             if ($base1x === '') {
                 continue;
             }
 
-            $doubleWidth = $fw > 0 ? $fw * 2 : 0;
-            $doubleHeight = $fh > 0 ? $fh * 2 : 0;
-            $base2x = $this->buildResizeBase($cleanPath, $doubleWidth, $doubleHeight);
-            if ($base2x === '') {
-                $base2x = $base1x;
+            $base2x = null;
+            if ($hdpi) {
+                $doubleWidth = $fw > 0 ? $fw * 2 : 0;
+                $doubleHeight = $fh > 0 ? $fh * 2 : 0;
+                $base2x = $this->buildResizeBase($path, $doubleWidth, $doubleHeight);
+                if ($base2x === '') {
+                    $base2x = $base1x;
+                }
             }
 
             $resolved[] = [
@@ -985,6 +1084,12 @@ class Ps_Fars extends Module
 
         $fallbacks = $this->normalizeFallbacks($params['fallbacks'] ?? []);
 
+        $hdpiNormalized = null;
+        if (array_key_exists('hdpi', $params)) {
+            $hdpiNormalized = $this->normalizeBoolean($params['hdpi']);
+        }
+        $hdpiEnabled = $hdpiNormalized === null ? true : (bool) $hdpiNormalized;
+
         return [
             'service' => $this->getServiceUrl(),
             'src' => $this->cleanSourcePath((string) ($params['url'] ?? ($params['src'] ?? ($params['image'] ?? '')))),
@@ -1001,7 +1106,109 @@ class Ps_Fars extends Module
             'fallbacks' => $fallbacks,
             'sizes' => (string) ($params['sizes'] ?? ''),
             'formats' => $this->getPictureFormats(),
+            'hdpi' => $hdpiEnabled,
         ];
+    }
+
+    private function buildPreloadVariants(array $prepared): array
+    {
+        $variants = [];
+        $seen = [];
+
+        $base = [
+            'w' => (int) $prepared['w'],
+            'h' => (int) $prepared['h'],
+            'media' => '',
+            'sizes' => trim((string) $prepared['sizes']),
+        ];
+
+        $variants[] = $base;
+        $seen[$base['w'] . 'x' . $base['h'] . '|' . $base['media']] = true;
+
+        foreach ($prepared['fallbacks'] as $fallback) {
+            $variant = [
+                'w' => isset($fallback['w']) ? (int) $fallback['w'] : 0,
+                'h' => isset($fallback['h']) ? (int) $fallback['h'] : 0,
+                'media' => isset($fallback['media']) ? trim((string) $fallback['media']) : '',
+                'sizes' => isset($fallback['sizes']) ? trim((string) $fallback['sizes']) : '',
+            ];
+
+            $dedupeKey = $variant['w'] . 'x' . $variant['h'] . '|' . $variant['media'];
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+
+            $variants[] = $variant;
+            $seen[$dedupeKey] = true;
+        }
+
+        return $variants;
+    }
+
+    private function buildPreloadLinkTag(array $prepared, array $variant, array $format): string
+    {
+        $width = isset($variant['w']) ? (int) $variant['w'] : 0;
+        $height = isset($variant['h']) ? (int) $variant['h'] : 0;
+
+        $base = $this->buildResizeBase($prepared['src'], $width, $height);
+        if ($base === '') {
+            return '';
+        }
+
+        $href = $base . $format['extension'];
+
+        $srcsetEntries = [$href . ' 1x'];
+        $hdpiEnabled = isset($prepared['hdpi']) ? (bool) $prepared['hdpi'] : true;
+        if ($hdpiEnabled && ($width > 0 || $height > 0)) {
+            $doubleWidth = $width > 0 ? $width * 2 : 0;
+            $doubleHeight = $height > 0 ? $height * 2 : 0;
+            $doubleBase = $this->buildResizeBase($prepared['src'], $doubleWidth, $doubleHeight);
+            if ($doubleBase !== '' && $doubleBase !== $base) {
+                $srcsetEntries[] = $doubleBase . $format['extension'] . ' 2x';
+            }
+        }
+
+        $attributes = [
+            'rel' => 'preload',
+            'as' => 'image',
+            'type' => (string) $format['mime'],
+            'href' => $href,
+            'imagesrcset' => implode(', ', $srcsetEntries),
+        ];
+
+        $fetchpriority = trim((string) $prepared['fetchpriority']);
+        if ($fetchpriority !== '') {
+            $attributes['fetchpriority'] = $fetchpriority;
+        }
+
+        $sizesValue = isset($variant['sizes']) ? trim((string) $variant['sizes']) : '';
+        if ($sizesValue === '' && $width > 0) {
+            $sizesValue = $width . 'px';
+        }
+        if ($sizesValue !== '') {
+            $attributes['imagesizes'] = $sizesValue;
+        }
+
+        $media = isset($variant['media']) ? trim((string) $variant['media']) : '';
+        if ($media !== '') {
+            $attributes['media'] = $media;
+        }
+
+        return $this->buildLinkTag($attributes);
+    }
+
+    private function buildLinkTag(array $attributes): string
+    {
+        $parts = [];
+        foreach ($attributes as $name => $value) {
+            if ($value === '') {
+                continue;
+            }
+
+            $parts[] = $name . '="' . $this->escapeAttribute((string) $value) . '"';
+        }
+
+        return '<link ' . implode(' ', $parts) . '>';
     }
 
     private function getPictureFormats(): array
@@ -1072,6 +1279,7 @@ class Ps_Fars extends Module
                 'w' => $this->parseDimension($fallback['w'] ?? ($fallback['width'] ?? null)),
                 'h' => $this->parseDimension($fallback['h'] ?? ($fallback['height'] ?? null)),
                 'media' => isset($fallback['media']) ? (string) $fallback['media'] : '',
+                'sizes' => isset($fallback['sizes']) ? (string) $fallback['sizes'] : '',
             ];
         }
 
@@ -1285,12 +1493,12 @@ class Ps_Fars extends Module
 
     private function buildSizeSpecification(int $width, int $height): string
     {
-        $normalizedWidth = $width > 0 ? (string) $width : '';
-        $normalizedHeight = $height > 0 ? (string) $height : '';
-
-        if ($normalizedWidth === '' && $normalizedHeight === '') {
+        if ($width <= 0 && $height <= 0) {
             return '0x0';
         }
+
+        $normalizedWidth = $width > 0 ? (string) $width : '0';
+        $normalizedHeight = $height > 0 ? (string) $height : '0';
 
         return $normalizedWidth . 'x' . $normalizedHeight;
     }

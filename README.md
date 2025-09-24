@@ -70,6 +70,8 @@ Scans an HTML fragment and replaces standalone local `<img>` tags (relative URLs
   ['media' => '(max-width: 768px)', 'w' => 480, 'h' => 320],
   ['media' => '(min-width: 1200px)', 'w' => 1440, 'h' => 810]
 ]}
+
+Pass `hdpi=false` (named parameter or modifier argument) to skip retina (2×) sources during the transformation.
 ```
 
 ## Internal templates
